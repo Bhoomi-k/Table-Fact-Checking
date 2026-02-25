@@ -37,11 +37,20 @@ from torch.nn import CrossEntropyLoss, MSELoss
 from scipy.stats import pearsonr, spearmanr
 from sklearn.metrics import matthews_corrcoef, f1_score
 
-from pytorch_pretrained_bert.file_utils import PYTORCH_PRETRAINED_BERT_CACHE, WEIGHTS_NAME, CONFIG_NAME
-from pytorch_pretrained_bert.modeling import BertForSequenceClassification, BertConfig
-from pytorch_pretrained_bert.tokenization import BertTokenizer
-from pytorch_pretrained_bert.optimization import BertAdam, WarmupLinearSchedule
-from tensorboardX import SummaryWriter
+# from pytorch_pretrained_bert.file_utils import PYTORCH_PRETRAINED_BERT_CACHE, WEIGHTS_NAME, CONFIG_NAME
+# from pytorch_pretrained_bert.modeling import BertForSequenceClassification, BertConfig
+# from pytorch_pretrained_bert.tokenization import BertTokenizer
+# from pytorch_pretrained_bert.optimization import BertAdam, WarmupLinearSchedule
+
+from transformers import (
+    BertForSequenceClassification,
+    BertConfig,
+    BertTokenizer,
+    get_linear_schedule_with_warmup
+)
+
+from torch.optim import AdamW
+from torch.utils.tensorboard import SummaryWriter
 from pprint import pprint
 logger = logging.getLogger(__name__)
 
@@ -432,18 +441,18 @@ def main():
                         help="Loss scaling to improve fp16 numeric stability. Only used when fp16 set to True.\n"
                              "0 (default value): dynamic loss scaling.\n"
                              "Positive power of 2: static loss scaling value.\n")
-    parser.add_argument('--server_ip', type=str, default='', help="Can be used for distant debugging.")
-    parser.add_argument('--server_port', type=str, default='', help="Can be used for distant debugging.")
+    # parser.add_argument('--server_ip', type=str, default='', help="Can be used for distant debugging.")
+    # parser.add_argument('--server_port', type=str, default='', help="Can be used for distant debugging.")
     args = parser.parse_args()
     pprint(vars(args))
     sys.stdout.flush()
 
-    if args.server_ip and args.server_port:
-        # Distant debugging - see https://code.visualstudio.com/docs/python/debugging#_attach-to-a-local-script
-        import ptvsd
-        print("Waiting for debugger attach")
-        ptvsd.enable_attach(address=(args.server_ip, args.server_port), redirect_output=True)
-        ptvsd.wait_for_attach()
+    # if args.server_ip and args.server_port:
+    #     # Distant debugging - see https://code.visualstudio.com/docs/python/debugging#_attach-to-a-local-script
+    #     import ptvsd
+    #     print("Waiting for debugger attach")
+    #     ptvsd.enable_attach(address=(args.server_ip, args.server_port), redirect_output=True)
+    #     ptvsd.wait_for_attach()
 
     processors = {
         "qqp": QqpProcessor,
@@ -516,26 +525,26 @@ def main():
         if args.local_rank != -1:
             num_train_optimization_steps = num_train_optimization_steps // torch.distributed.get_world_size()
 
-    cache_dir = args.cache_dir if args.cache_dir else os.path.join(str(PYTORCH_PRETRAINED_BERT_CACHE), 'distributed_{}'.format(args.local_rank))
+    # cache_dir = args.cache_dir if args.cache_dir else os.path.join(str(PYTORCH_PRETRAINED_BERT_CACHE), 'distributed_{}'.format(args.local_rank))
+    cache_dir = args.cache_dir if args.cache_dir else None
     if args.load_dir:
         load_dir = args.load_dir
     else:
         load_dir = args.bert_model
 
     model = BertForSequenceClassification.from_pretrained(load_dir,
-                                                          cache_dir=cache_dir,
                                                           num_labels=num_labels)
-    if args.fp16:
-        model.half()
+    # if args.fp16:
+    #     model.half()
     model.to(device)
-    if args.local_rank != -1:
-        try:
-            from apex.parallel import DistributedDataParallel as DDP
-        except ImportError:
-            raise ImportError("Please install apex from https://www.github.com/nvidia/apex to use distributed and fp16 training.")
+    # if args.local_rank != -1:
+    #     try:
+    #         from apex.parallel import DistributedDataParallel as DDP
+    #     except ImportError:
+    #         raise ImportError("Please install apex from https://www.github.com/nvidia/apex to use distributed and fp16 training.")
 
-        model = DDP(model)
-    elif n_gpu > 1:
+    #     model = DDP(model)
+    if n_gpu > 1:
         model = torch.nn.DataParallel(model)
 
     # Prepare optimizer
@@ -546,29 +555,43 @@ def main():
             {'params': [p for n, p in param_optimizer if not any(nd in n for nd in no_decay)], 'weight_decay': 0.01},
             {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
             ]
-        if args.fp16:
-            try:
-                from apex.optimizers import FP16_Optimizer
-                from apex.optimizers import FusedAdam
-            except ImportError:
-                raise ImportError("Please install apex from https://www.github.com/nvidia/apex to use distributed and fp16 training.")
+        # if args.fp16:
+        #     try:
+        #         from apex.optimizers import FP16_Optimizer
+        #         from apex.optimizers import FusedAdam
+        #     except ImportError:
+        #         raise ImportError("Please install apex from https://www.github.com/nvidia/apex to use distributed and fp16 training.")
 
-            optimizer = FusedAdam(optimizer_grouped_parameters,
-                                  lr=args.learning_rate,
-                                  bias_correction=False,
-                                  max_grad_norm=1.0)
-            if args.loss_scale == 0:
-                optimizer = FP16_Optimizer(optimizer, dynamic_loss_scale=True)
-            else:
-                optimizer = FP16_Optimizer(optimizer, static_loss_scale=args.loss_scale)
-            warmup_linear = WarmupLinearSchedule(warmup=args.warmup_proportion,
-                                                 t_total=num_train_optimization_steps)
+        #     optimizer = FusedAdam(optimizer_grouped_parameters,
+        #                           lr=args.learning_rate,
+        #                           bias_correction=False,
+        #                           max_grad_norm=1.0)
+        #     if args.loss_scale == 0:
+        #         optimizer = FP16_Optimizer(optimizer, dynamic_loss_scale=True)
+        #     else:
+        #         optimizer = FP16_Optimizer(optimizer, static_loss_scale=args.loss_scale)
+        #     warmup_linear = WarmupLinearSchedule(warmup=args.warmup_proportion,
+        #                                          t_total=num_train_optimization_steps)
 
-        else:
-            optimizer = BertAdam(optimizer_grouped_parameters,
-                                 lr=args.learning_rate,
-                                 warmup=args.warmup_proportion,
-                                 t_total=num_train_optimization_steps)
+        # else:
+        #     optimizer = BertAdam(optimizer_grouped_parameters,
+        #                          lr=args.learning_rate,
+        #                          warmup=args.warmup_proportion,
+        #                          t_total=num_train_optimization_steps)
+
+        optimizer = AdamW(
+            optimizer_grouped_parameters,
+            lr=args.learning_rate,
+            weight_decay=0.01
+        )
+
+        num_warmup_steps = int(args.warmup_proportion * num_train_optimization_steps)
+
+        scheduler = get_linear_schedule_with_warmup(
+            optimizer,
+            num_warmup_steps=num_warmup_steps,
+            num_training_steps=num_train_optimization_steps
+        )
 
     global_step = 0
     tr_loss = 0
@@ -604,8 +627,14 @@ def main():
                 input_ids, input_mask, segment_ids, label_ids = batch
 
                 # define a new function to compute loss values for both output_modes
-                logits = model(input_ids, segment_ids, input_mask, labels=None)
-
+                # logits = model(input_ids, segment_ids, input_mask, labels=None)
+                outputs = model(
+                    input_ids=input_ids,
+                    attention_mask=input_mask,
+                    token_type_ids=segment_ids,
+                    labels=None
+                )
+                logits = outputs.logits
                 if output_mode == "classification":
                     loss_fct = CrossEntropyLoss()
                     loss = loss_fct(logits.view(-1, num_labels), label_ids.view(-1))
@@ -618,8 +647,8 @@ def main():
                 if args.gradient_accumulation_steps > 1:
                     loss = loss / args.gradient_accumulation_steps
 
-                if args.fp16:
-                    optimizer.backward(loss)
+                # if args.fp16:
+                #     optimizer.backward(loss)
                 else:
                     loss.backward()
 
@@ -638,13 +667,14 @@ def main():
                     preds = torch.argmax(logits, -1) == label_ids
                     acc = torch.sum(preds).float() / preds.size(0)
                     writer.add_scalar('train/gradient_norm', total_norm, global_step)
-                    if args.fp16:
-                        # modify learning rate with special warm up BERT uses
-                        # if args.fp16 is False, BertAdam is used that handles this automatically
-                        lr_this_step = args.learning_rate * warmup_linear.get_lr(global_step, args.warmup_proportion)
-                        for param_group in optimizer.param_groups:
-                            param_group['lr'] = lr_this_step
+                    # if args.fp16:
+                    #     # modify learning rate with special warm up BERT uses
+                    #     # if args.fp16 is False, BertAdam is used that handles this automatically
+                    #     lr_this_step = args.learning_rate * warmup_linear.get_lr(global_step, args.warmup_proportion)
+                    #     for param_group in optimizer.param_groups:
+                    #         param_group['lr'] = lr_this_step
                     optimizer.step()
+                    scheduler.step()
                     optimizer.zero_grad()
                     model.zero_grad()
                     global_step += 1
@@ -660,12 +690,14 @@ def main():
                     if not os.path.exists(output_dir):
                         os.makedirs(output_dir)
 
-                    output_model_file = os.path.join(output_dir, WEIGHTS_NAME)
-                    output_config_file = os.path.join(output_dir, CONFIG_NAME)
+                    # output_model_file = os.path.join(output_dir, WEIGHTS_NAME)
+                    # output_config_file = os.path.join(output_dir, CONFIG_NAME)
 
-                    torch.save(model_to_save.state_dict(), output_model_file)
-                    model_to_save.config.to_json_file(output_config_file)
-                    tokenizer.save_vocabulary(output_dir)
+                    # torch.save(model_to_save.state_dict(), output_model_file)
+                    # model_to_save.config.to_json_file(output_config_file)
+                    # tokenizer.save_vocabulary(output_dir)
+                    model_to_save.save_pretrained(output_dir)
+                    tokenizer.save_pretrained(output_dir)
 
                     model.eval()
                     torch.set_grad_enabled(False)  # turn off gradient tracking
@@ -728,8 +760,15 @@ def evaluate(args, model, device, processor, label_list, num_labels, tokenizer, 
             label_ids = label_ids.to(device)
 
             with torch.no_grad():
-                logits = model(input_ids, segment_ids, input_mask, labels=None)
-
+                # logits = model(input_ids, segment_ids, input_mask, labels=None)
+                outputs = model(
+                    input_ids=input_ids,
+                    attention_mask=input_mask,
+                    token_type_ids=segment_ids,
+                    labels=None
+                )
+                logits = outputs.logits
+            
             # create eval loss and other metric required by the task
             if output_mode == "classification":
                 loss_fct = CrossEntropyLoss()
