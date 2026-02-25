@@ -45,7 +45,8 @@ def parse_opt():
 
 
 args = parse_opt()
-device = torch.device('cuda')
+# device = torch.device('cuda')
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 if not os.path.exists(args.output_dir):
     os.mkdir(args.output_dir)
@@ -126,12 +127,14 @@ def evaluate(val_dataloader, encoder_stat, encoder_prog):
 
         similarity = torch.sigmoid(logits)
         #similarity = torch.sigmoid(classifier(torch.cat([enc_stat, enc_prog], -1)).squeeze())
-        similarity = similarity.cpu().data.numpy()
+        # similarity = similarity.cpu().data.numpy()
+        similarity = similarity.detach().cpu().numpy()
         sim = (similarity > args.threshold).astype('float32')
-        labels = labels.cpu().data.numpy()
-        index = index.cpu().data.numpy()
-        true_lab = true_lab.cpu().data.numpy()
-        pred_lab = pred_lab.cpu().data.numpy()
+        # labels = labels.cpu().data.numpy()
+        labels = labels.detach().cpu().numpy()
+        index = index.detach().cpu().numpy()
+        true_lab = true_lab.detach().cpu().numpy()
+        pred_lab = pred_lab.detach().cpu().numpy()
 
         TP += ((sim == 1) & (labels == 1)).sum()
         TN += ((sim == 0) & (labels == 0)).sum()
@@ -147,10 +150,12 @@ def evaluate(val_dataloader, encoder_stat, encoder_prog):
                     inp = None
                     r = None
                 if i not in mapping:
-                    mapping[i] = [s, numpy.asscalar(p), numpy.asscalar(t), inp, r]
+                    # mapping[i] = [s, numpy.asscalar(p), numpy.asscalar(t), inp, r]
+                    mapping[i] = [s, p.item(), t.item(), inp, r]
                 else:
                     if s > mapping[i][0]:
-                        mapping[i] = [s, numpy.asscalar(p), numpy.asscalar(t), inp, r]
+                      mapping[i] = [s, p.item(), t.item(), inp, r]
+                        # mapping[i] = [s, numpy.asscalar(p), numpy.asscalar(t), inp, r]
         else:
             factor = 2
             for i, s, p, t in zip(index, similarity, pred_lab, true_lab):
@@ -216,7 +221,7 @@ if args.do_train:
 
     params = chain(encoder_stat.parameters(), encoder_prog.parameters())
     optimizer = torch.optim.Adam(filter(lambda x: x.requires_grad, params),
-                                 lr=args.learning_rate, betas=(0.9, 0.98), eps=0.9e-09)
+                                 lr=args.learning_rate, betas=(0.9, 0.98), eps=1e-8)
     best_accuracy = 0
     for epoch in range(10):
         for step, batch in enumerate(train_dataloader):
@@ -246,8 +251,8 @@ if args.do_train:
 
             if (step + 1) % 20 == 0:
                 print("Loss function = {}".format(loss.item()),
-                      list(pred[:10].cpu().data.numpy()),
-                      list(labels[:10].cpu().data.numpy()))
+                      list(pred[:10].detach().cpu().numpy()),
+                      list(labels[:10].detach().cpu().numpy()))
 
             if (step + 1) % 200 == 0:
                 encoder_stat.eval()
